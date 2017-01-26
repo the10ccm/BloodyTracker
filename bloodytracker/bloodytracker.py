@@ -794,11 +794,11 @@ Description
             row[-1] = helpers.seconds_to_human(row[-1])
             refined.append(row)
         print(u"{eol}Date: {date}".format(
-            eol=os.linesep, date=datetime.date.strftime(datetime.date.today(),
-                                                        "%x").decode('utf8')))
-        print(u"From: %s" % datetime.date.strftime(started, "%x").decode('utf8'))
+            eol=os.linesep, date=datetime.date.strftime(
+                datetime.date.today(), "%a %b %d %Y").decode('utf8')))
+        print(u"From: %s" % datetime.date.strftime(started, "%a %b %d %Y").decode('utf8'))
         print(u"To:   %s" % datetime.date.strftime(
-            finished, "%x").decode('utf8'))
+            finished, "%a %b %d %Y").decode('utf8'))
         # add a total footer
         footer = [''] * len(headers)
         footer[0], footer[-1] = 'Total:', helpers.seconds_to_human(total_spent)

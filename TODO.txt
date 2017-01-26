@@ -9,3 +9,4 @@ TODO
 6. Allow to create an alias
 7. Calculate your income
 8. Round time to 5 minues
+9. Colorize
