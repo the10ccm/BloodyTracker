@@ -1,0 +1,11 @@
+TODO
+====
+
+1. Realtime stats/timer - total/last
+2. Time announce and alarms
+3. Autocomplete
+4. Export/import csv/xml
+5. Scrolled listinigs
+6. Allow to create an alias
+7. Calculate your income
+8. Round time to 5 minues
