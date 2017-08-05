@@ -24,7 +24,7 @@ pip install git+git://github.com/the10ccm/BloodyTracker.git
 
 ## Configuration
 
-The same as working files, the configuration file `bt.cfg` is located in the home directory `{$HOME}/.bloodytracker/`. The config file is being created automatically after the tracker was run unless the file was not found.
+The same as working files, the configuration file `bt.cfg` is located in the home directory `{$HOME}/.bloodytracker/`. The config file is being created automatically after the tracker was run unless the file was found.
 
 There are some useful options that can help you to tickle the tracker.
 ```
@@ -154,7 +154,7 @@ The syntax of the `projects` and `tasks` commands is:
 <command> [<period>]
 ```
 
-The commands display last 10 project/tasks unless the period parameter is omitted. The list contains the general fields such as: an ID, task and project names, description. As well there is an `Activity` field which exposes the state of a task or project. The state is marked as `[closed]` if a task is done and a project is not active. In a case, if the task is being tracked, the activity field shows how much time already was spent since tracking was started.
+The commands display last 10 project/tasks unless the period parameter is present. The list contains the general fields such as: an ID, task and project names, description. As well there is an `Activity` field which exposes the state of a task or project. The state is marked as `[closed]` if a task is done and a project is not active. In a case, if the task is being tracked, the activity field shows how much time already was spent since tracking was started.
 
 Here is a shot of using this commands:
 ```
@@ -174,11 +174,17 @@ Here is a shot of using this commands:
 #### Period parameter
 The period parameter has its own syntax:
 ```
-[<from> [<to>]] | [today|week|month|year|all]
+[<from> [<to>]] | [today|[d]week|[d]month|[d]year|all]
 ```
-The date period can be specified by a single date, from-to pair or keywords: `today`, `week`, `month`, `year`, `all`.
+The date period can be specified by a single date, from-to pair or keyword - 'today',
+'[d]week', '[d]month', '[d]year', 'all'.
 
-The dates have national representation of the date. Take a look at the `strftime('%x')` function or run `date "+%x"` in the shell. The representation of the date depends on the `locale` option in the config. So you can fiddle one to what you want to see and how you want to input dates.
+'week', 'month', 'year' - The date keywords are periods beginning with
+the first calendar day of the period (e.g. 1st Aug, Monday or 1/1/2017).
+
+'dweek', 'dmonth', 'dyear' - are periods having been begun 7, 31 or 365 days ago.
+
+The dates have national representation of the date. Take a look at the `strftime('%x')` function or run `date "+%x"` in the Shell. The representation of the date depends on the `locale` option in the config. So you can fiddle one to what you want to see and how you want to input dates.
 
 #### Active Task
 To get information about current active task use the command:
@@ -196,11 +202,9 @@ Example:
 ```
 
 ## Timesheet
-Timesheet is a command manipulates tracking data and creates a report. Using an external editor, it allows to update tracks for a specified period, change how much time must be spent and mark any tracks as unbilled. So now we will focus on two actions: updating and reporting.
+Timesheet is a command manipulates tracking data and creates a report. Using an external editor, it allows for update tracks for a specified period, change how much time was spent and mark any track as unbilled. So now we will focus on actions: updating and reporting.
 
 ### How to update tracking data
-Update command allows to update tracks in an external editor where you can change working hourse and mark any tracks to make them unbilled by the '#' character. Use the 'external_editor' config option to set up the editor. Make sure the editor can be run in foreground.
-
 The syntax of the update command is:
 ```
 timesheet update <period>
@@ -211,12 +215,17 @@ The `<period>` parameter has [general format](#period-parameter). It is already 
 Example:
 ```
 (bloody)> timesheet update all
+...
 
 # From Date: 2017-01-01
 # To Date:   2017-01-24
 #
-# Update the dates only!
+# No updating, but the dates only!
 # Use the '#' character to mark a track as unbilled.
+#
+# Example track:
+#     15 cost#kafka '08/05/2017 23:50:59' '08/05/2017 23:50:59'
+#
 
   ID  Task          Started                Finished
 ----  ------------  ---------------------  ---------------------
@@ -224,7 +233,24 @@ Example:
   15  run#Fastlane  '01/24/2017 00:28:23'  '01/24/2017 00:50:19'
 #  16  run#Fastlane  '01/24/2017 00:50:36'  '01/24/2017 00:50:38'
   17  run#Fastlane  '01/24/2017 14:40:15'  '01/24/2017 14:47:10'
+
+...
 ```
+
+To mark any track as unbilled add the '#' character before the track (e.g. 16 at the screenshot).
+
+There are few option in the config you can set:
+```
+external_editor   - pointed to an external editor. Make sure the editor can
+                    be run in foreground.
+start_at_line_arg - an argument of the external editor to start editing at line <lnum>
+```
+
+To add a new track record to the timesheet insert a new string in the format:
+```
+<billed> <alias> '<started>' '<finished>'
+```
+
 
 ### Timesheet Report
 At the end we have come to the moment for what this whole thing is all about. It is how to make Bloody Tracker get a summary of working hours. The summary is presented in a tabular form. The tracker manages various essential entities. There are only four entities: a *date*, *project*, *task* and *track record*. Every one of such entities maps a set of certain track fields or whole row records to a column in the result table. The result set is grouped according to the purpose of the entity was used. What does it mean? It means when the *date* entity is used the total is reckoned for a set of tracking records grouped by the date field. The result table will contain only those columns that were specified by the entities.
@@ -312,15 +338,36 @@ To:   01/26/2017
 ### Shortcuts
 Bloody Tracker provides an ability to shortcut the commands. Here they are:
 ```
-a     - active
-d     - done
-pp    - projects
-p     - project
-tt    - tasks
-t     - task
-ts    - timesheet
-tsup  - timesheet update today
-q     - quit
+alias | shell's command
+------+------------------------
+a     | active
+d     | done
+pp    | projects
+p     | project
+tt    | tasks
+t     | task
+ts    | timesheet
+up    | timesheet update
+upt   | timesheet update today
+upw   | timesheet update week
+upm   | timesheet update month
+rt    | timesheet report today
+rrt   | timesheet report extend track today
+rw    | timesheet report week
+rrw   | timesheet report extend track week
+rm    | timesheet report month
+ry    | timesheet report year
+q     | quit
+```
+
+## History
+
+### v1.0.2
+```
+[new] Allowed to add a new track with the external editor
+[new] New shortcuts were added
+[new] Date periods have been presented as absolute and calendar values
+[fix] DB-API’s parameter substitution fixed
 ```
 
 #### Author: Andrey Aleksandrov (the10ccm@gmail.com) (c) 2017

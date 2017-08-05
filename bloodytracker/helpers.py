@@ -45,12 +45,23 @@ def print_project_info(project):
     print(tabulate(info))
 
 
+def is_name_valid(name):
+    """Validates a project's or task's name """
+    error = "*** Error: Wrong name. Alphanumeric symbols are allowed only."
+    try:
+        groups = re.match(r'^(?P<name>\w+)$', name, re.U).groups()
+    except AttributeError:
+        raise ValueError(error)
+    return groups
+
+
 def parse_task_alias(arg):
     """Returns an encoded byte-strings of the parsed alias """
     """ as {'task': '<name>', 'project': '<name>'}"""
-    error = "*** Error: Wrong '<task>#<project>' format."
+    error = "*** Error: Wrong '<task>#<project>' format. " \
+            "Alphanumeric symbols and sharp are allowed only."
     try:
-        return re.match(r'^(?P<task>\w+)#(?P<project>\w+)',
+        return re.match(r'^(?P<task>\w+)#(?P<project>\w+)$',
                         arg, re.U).groupdict()
     except AttributeError:
         raise ValueError(error)
@@ -68,9 +79,9 @@ def parse_date(date_string):
 
 
 def parse_date_parameters(args):
-    """Parses date parameters from cli. Returns a tuple of started and
+    """Parses date parameters from CLI. Returns a tuple of started and
 finished dates."""
-    """Format: [<from> [<to>]] | [today|week|month|year|all]
+    """Format: [<from> [<to>]] | [today|[d]week|[d]month|[d]year|all]
            <from>|<to> - '<date>' | 'today'
     """
     error = "*** Error: Unknown date. Use national representation of the date " \
@@ -82,12 +93,18 @@ finished dates."""
     args = [arg.lower() for arg in args]
     today = datetime.date.today()
     finished = today
-    if args[0] == 'week':
+    if args[0] == 'dweek':
         started = finished - datetime.timedelta(days=7)
-    elif args[0] == 'month':
+    elif args[0] == 'week':
+        started = finished - datetime.timedelta(days=finished.weekday())
+    elif args[0] == 'dmonth':
         started = finished - datetime.timedelta(days=31)
-    elif args[0] == 'year':
+    elif args[0] == 'month':
+        started = finished.replace(finished.year, finished.month, 1)
+    elif args[0] == 'dyear':
         started = finished - datetime.timedelta(days=365)
+    elif args[0] == 'year':
+        started = finished.replace(finished.year, 1, 1)
     elif args[0] == 'all':
         started = datetime.date.fromtimestamp(0)
     elif args[0] == 'today':

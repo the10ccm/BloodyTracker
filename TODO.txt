@@ -1,12 +1,14 @@
 TODO
 ====
 
-1. Realtime stats/timer - total/last
-2. Time announce and alarms
-3. Autocomplete
-4. Export/import csv/xml
-5. Scrolled listinigs
-6. Allow to create an alias
-7. Calculate your income
-8. Round time to 5 minues
-9. Colorize
+01. Realtime stats/timer - total/last
+02. Time announce and alarms
+03. Autocomplete
+04. Export/import csv/xml
+05. Scrolled listinigs
+06. Allow to create an alias
+07. Calculate your income
+08. Round time to 5 minues
+09. Colorize
+10. Display a calendar
+11. [Hi] Delete track in the external editor

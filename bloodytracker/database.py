@@ -191,7 +191,7 @@ class Database:
             "   description as description "
             "FROM Projects "
             "WHERE "
-            "   Projects.name == '{name}'".format(name=pname.encode('utf8'))
+            "   Projects.name == ?", (pname.encode('utf8'),)
         )
         return self.cursor.fetchone()
 
@@ -257,9 +257,11 @@ class Database:
         """Create a project"""
         self.cursor.execute(
             "INSERT INTO Projects ('name', 'description', created)"
-            "VALUES ('{name}', '{description}', '{created!s}')"
-            "".format(name=pname.encode('utf8'), description=description.encode('utf8'),
-                      created=datetime.datetime.now())
+            "VALUES (?, ?, ?)", (
+                pname.encode('utf8'),
+                description.encode('utf8'),
+                str(datetime.datetime.now())
+                )
         )
         self.conn.commit()
         return self.cursor.lastrowid
@@ -354,8 +356,10 @@ class Database:
         self.cursor.execute(
             "INSERT INTO Tasks ('name', 'project_id') "
             "VALUES "
-            "   ('{name:s}', '{project!s}')"
-            "".format(name=name.encode('utf8'), project=pid)
+            "   (?, ?)", (
+                name.encode('utf8'),
+                pid
+            )
         )
         self.conn.commit()
         return self.cursor.lastrowid
@@ -395,18 +399,21 @@ class Database:
 
     def get_active_task(self, started='', finished='', tname='', pname=''):
         """Get an active task"""
+        params = []
         where_date_clause = where_project_clause = where_task_clause = ''
         if tname:
             tname = tname.encode('utf8')
-            where_task_clause = "tname == '%s' AND " % tname
+            where_task_clause = "tname == ? AND "
+            params.append(tname)
         if pname:
             pname = pname.encode('utf8')
-            where_project_clause = "pname == '%s' AND " % pname
+            where_project_clause = "pname == ? AND "
+            params.append(pname)
         if started and finished:
             where_date_clause = "AND DATE(Tracks.started) " \
-                                "   BETWEEN '{started}' " \
-                                "   AND '{finished}' ".format(started=started,
-                                                              finished=finished)
+                                "   BETWEEN ? " \
+                                "   AND ? "
+            params.extend([started, finished])
         self.cursor.execute(
             "SELECT "
             "   Tasks.id as tid, Tasks.name as tname, Projects.name as pname, "
@@ -423,7 +430,7 @@ class Database:
             "   {where_date_clause}".format(
                 where_date_clause=where_date_clause,
                 where_project_clause=where_project_clause,
-                where_task_clause=where_task_clause)
+                where_task_clause=where_task_clause), params
             )
         return self.cursor.fetchone()
 
@@ -432,7 +439,11 @@ class Database:
         self.cursor.execute(
             "UPDATE Tasks "
             "SET name=?, description=?"
-            "WHERE id=?", (name.encode('utf8'), description.encode('utf8'), tid)
+            "WHERE id=?", (
+                name.encode('utf8'),
+                description.encode('utf8'),
+                tid
+                )
         )
         self.conn.commit()
 
@@ -569,13 +580,16 @@ class Database:
 
     def get_minimal_started_track(self, tname='', pname=''):
         """Get a minimal tracked date"""
+        params = []
         where_project_clause = where_task_clause = ''
         if tname:
             tname = tname.encode('utf8')
-            where_task_clause = "tname == '%s' AND " % tname
+            where_task_clause = "tname == ? AND "
+            params.append(tname)
         if pname:
             pname = pname.encode('utf8')
-            where_project_clause = "pname == '%s' AND " % pname
+            where_project_clause = "pname == ? AND "
+            params.append(pname)
         self.cursor.execute(
             "SELECT "
             "   Tasks.id as tid, Tasks.name as tname, Projects.name as pname, "
@@ -587,21 +601,23 @@ class Database:
             "   Tracks.task_id == tid AND "
             "   Tasks.project_id == Projects.id"
             "".format(where_task_clause=where_task_clause,
-                      where_project_clause=where_project_clause))
+                      where_project_clause=where_project_clause), params)
         return self.cursor.fetchone()
 
     def get_timesheet(self, started, finished, group_by_mask, only_billed=True,
                       tname='', pname=''):
         """ Gets the time was spent for a task/project"""
+        params = []
         only_billed_clause = where_project_clause = where_task_clause = ''
         if tname:
-            tname = tname.encode('utf8')
-            where_task_clause = "tname == '%s' AND " % tname
+            params.append(tname.encode('utf8'))
+            where_task_clause = "tname == ? AND "
         if pname:
-            pname = pname.encode('utf8')
-            where_project_clause = "pname == '%s' AND " % pname
+            params.append(pname.encode('utf8'))
+            where_project_clause = "pname == ? AND "
         if only_billed:
             only_billed_clause = " AND Tracks.is_billed == 1 "
+        params.extend([started, finished])
         group_by_clause = self.get_group_by_clause(group_by_mask)
         query = str(
             "SELECT "
@@ -616,7 +632,7 @@ class Database:
             "   Tracks.task_id == tid AND "
             "   Tasks.project_id == Projects.id AND "
             "   ("
-            "       DATE(started) BETWEEN '{started}' AND '{finished}'"
+            "       DATE(started) BETWEEN ? AND ?"
             "       AND NOT Tracks.finished  == ''"
             "       {only_billed_clause}"
             "    ) "
@@ -633,5 +649,5 @@ class Database:
             select_clause = self.get_timesheet_select_clause(group_by_mask)
             query = "SELECT {clause} FROM ({query})".format(
                 query=query, clause=select_clause)
-        self.cursor.execute(query)
+        self.cursor.execute(query, params)
         return self.cursor.fetchall()

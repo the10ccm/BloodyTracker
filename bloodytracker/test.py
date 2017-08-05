@@ -51,11 +51,11 @@ class TestHelpers(unittest.TestCase):
         # Check 'today|week|month|year|all' keywords
         res = helpers.parse_date_parameters(('today',))
         self.assertEqual(res, (today, today))
-        res = helpers.parse_date_parameters(('week',))
+        res = helpers.parse_date_parameters(('dweek',))
         self.assertEqual(res, (today-datetime.timedelta(days=7), today))
-        res = helpers.parse_date_parameters(('month',))
+        res = helpers.parse_date_parameters(('dmonth',))
         self.assertEqual(res, (today-datetime.timedelta(days=31), today))
-        res = helpers.parse_date_parameters(('year',))
+        res = helpers.parse_date_parameters(('dyear',))
         self.assertEqual(res, (today-datetime.timedelta(days=365), today))
         res = helpers.parse_date_parameters(('all',))
         self.assertTrue(res)
@@ -98,6 +98,18 @@ class TestCLITimesheet(unittest.TestCase):
                 dt = random.randint(1, 3600*12)
             delta = datetime.timedelta(seconds=dt)
             self.shell.db.create_track(tid, started+delta, finished+delta)
+
+        def _test_report(cmd, timesheet, total):
+            with patch('sys.stdout', new=StringIO()) as output:
+                self.shell.do_timesheet(cmd)
+                screened = output.getvalue().split(os.linesep)
+                screen = screened[7:-4]
+            self.assertEqual(len(timesheet), len(screen))
+            for i, line in enumerate(screen):
+                for assert_value in timesheet[i]:
+                    self.assertIn(assert_value, line)
+            self.assertIn(total, screened[-3])
+
         # Yesterday
         # p1 t1: 70m
         # p2 t21: 1d 3h
@@ -106,7 +118,7 @@ class TestCLITimesheet(unittest.TestCase):
         # p2 t2.1: 50m
         # p2 t2.2: 2h:30m
         """
-        External editor shot
+        External editor's shot
         1  t1#p1   '01/24/2017 15:00:00'  '01/24/2017 16:10:00'
         2  t21#p2  '01/24/2017 15:15:00'  '01/25/2017 18:15:00'
         3  t1#p1   '01/25/2017 15:15:32'  '01/25/2017 15:55:32'
@@ -134,6 +146,7 @@ class TestCLITimesheet(unittest.TestCase):
         _create_track(tid21, today, today+datetime.timedelta(seconds=50*60), 6)
         finished = today+datetime.timedelta(seconds=2*3600+30*60)
         _create_track(tid22, today, finished, 7)
+
         # test today
         with patch('sys.stdout', new=StringIO()) as output:
             self.shell.do_timesheet('report  ')
@@ -155,17 +168,6 @@ class TestCLITimesheet(unittest.TestCase):
             self.shell.do_timesheet('report task {}#unknown_project all'
                                     ''.format(tname1.encode('utf-8')))
             self.assertIn('Error', output.getvalue().strip())
-
-        def _test_report(cmd, timesheet, total):
-            with patch('sys.stdout', new=StringIO()) as output:
-                self.shell.do_timesheet(cmd)
-                screened = output.getvalue().split(os.linesep)
-                screen = screened[7:-4]
-            self.assertEqual(len(timesheet), len(screen))
-            for i, line in enumerate(screen):
-                for assert_value in timesheet[i]:
-                    self.assertIn(assert_value, line)
-            self.assertIn(total, screened[-3])
 
         # test <default_extend> for <all>
         """
@@ -215,7 +217,7 @@ class TestCLITimesheet(unittest.TestCase):
         _test_report('report project %s all' % pname1.encode('utf-8'),
                      timesheet, '2h:35m:00s')
 
-        # test <default_extend> for task t1#p1
+        # test <default_extend> for task t21#p2
         """
         |     Date |   Task |   Project |        Time Spent |
         | 01/13/17 |    t21 |        p2 | 1 days 3h:00m:00s |
@@ -227,7 +229,8 @@ class TestCLITimesheet(unittest.TestCase):
         ]
         _test_report('report task %s#%s all' % (
             tname21.encode('utf-8'),
-            pname2.encode('utf-8')), timesheet, '1 days 3h:50m:00s')
+            pname2.encode('utf-8')),
+            timesheet, '1 days 3h:50m:00s')
 
         # test <extend> for <project>
         """
@@ -330,7 +333,6 @@ class TestCLIGeneral(unittest.TestCase):
     """Test shell commands"""
     def setUp(self):
         config.BT_DB_PATHNAME = ':memory:'
-        #config.BT_DB_PATHNAME = 'xxx'
         self.shell = BTShell()
 
     def tearDown(self):

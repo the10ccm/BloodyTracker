@@ -6,19 +6,22 @@ import datetime
 import locale
 import os
 import re
+import sys
 import readline
 import shlex
 from cmd import Cmd
 from subprocess import call
 from tempfile import NamedTemporaryFile
+import ConfigParser
 
 from tabulate import tabulate
 import builtins
 
 import config
-from database import TS_GROUP_BY, Database
 import helpers
 from contrib import (__version__, __release_date__, __author__, __email__)
+from database import TS_GROUP_BY, Database
+import errors
 
 
 class BTShell(Cmd):
@@ -52,26 +55,29 @@ class BTShell(Cmd):
         self.prompt = ('(%s)> ' % ps1)
 
     def init_config(self):
-        import ConfigParser
         error_message = "*** Error: Could not parse the '%s' config file." % config.BT_CFG_PATHNAME
         try:
             parser = ConfigParser.SafeConfigParser()
             cfgs = parser.read(config.BT_CFG_PATHNAME)
-        except ConfigParser.ParsingError, error:
+        except ConfigParser.ParsingError as error:
             raise ValueError(error_message)
-        editor_option = 'editor'
-        locale_option = 'locale'
         section = 'general'
+        editor_option = 'external_editor'
+        start_line_option = 'start_at_line_arg'
+        locale_option = 'locale'
         if not cfgs:
             # Default values
             parser.add_section(section)
-            parser.set(section, editor_option, 'vim')
-            parser.set(section, locale_option, 'en_US')
+            parser.set(section, editor_option, config.BT_EDITOR)
+            parser.set(section, start_line_option, config.BT_EDITOR_START_LINE)
+            parser.set(section, locale_option, config.BT_LOCALE)
             with open(config.BT_CFG_PATHNAME, 'wb') as configfile:
                 parser.write(configfile)
+            return
         try:
             config.BT_EDITOR = parser.get(section, editor_option)
             config.BT_LOCALE = parser.get(section, locale_option)
+            config.BT_EDITOR_START_LINE = parser.get(section, start_line_option)
         except ConfigParser.Error:
             raise ValueError(error_message)
 
@@ -143,12 +149,12 @@ class BTShell(Cmd):
         print(" \\o_  Bye-bye...")
         print(" /  ")
         print("<\\")
-        exit()
+        sys.exit()
 
     def do_fill_db_with_fake_tracks(self, arg):
         """Fill with the test tasks"""
         print('*** Warning! All records will be deleted!')
-        print('Do you really want to fill data base with fake records? [y/N] ', end='')
+        print('Do you really want to fill the Data Base with fake records? [y/N] ', end='')
         if not helpers.get_yes_no(default='n'):
             return
         self.db.fill()
@@ -158,8 +164,10 @@ class BTShell(Cmd):
         """Creates a project"""
         # type(project_name) == unicode
         name = builtins.input('Name: ').decode('utf-8')
-        if not name:
-            print('*** Error: The name of the project has to be non-empty.')
+        try:
+            cleaned = helpers.is_name_valid(name)
+        except (ValueError, ), error:
+            print(error)
             return
         description = builtins.input('Description: ').decode('utf-8')
         project = self.db.get_project_by_name(name)
@@ -339,7 +347,7 @@ Parameters
                                                      project['pname']))
 
     def do_d(self, arg):
-        """Shortcut for the done an active task command"""
+        """Shortcut for the done an active task command. Use 'help done' for details."""
         self.do_done(arg)
 
     def do_done(self, arg):
@@ -428,7 +436,7 @@ Usage
         self.set_prompt()
 
     def do_t(self, arg):
-        """Shortcut for the 'task' command"""
+        """Shortcut for the 'task' command. Use 'help task' for details."""
         self.do_task(arg)
 
     def do_task(self, arg):
@@ -477,7 +485,7 @@ Parameters
 
     # Various Listing commands
     def do_pp(self, arg):
-        """Lists of the projects"""
+        """Lists of the projects. Use 'help projects' for details."""
         self.do_projects(arg)
 
     def do_projects(self, arg):
@@ -489,13 +497,18 @@ Usage
 
 Description
     Displays a list of projects for a date piriod. The command displays last
-    10 projects unless the period is not specified.
+    10 projects unless the period is specified.
 
 Period parameter
-    <period> ::= <from> [<to>] | today|week|month|year|all
+    <period> ::= <from> [<to>] | today|[d]week|[d]month|[d]year|all
 
     The date period can be specified by a single date, from-to pair or
-    keyword - 'today', 'week', 'month', 'year', 'all'.
+    keyword - 'today', '[d]week', '[d]month', '[d]year', 'all'.
+
+    'week', 'month', 'year' - The date keywords are periods beginning with
+    the first calendar day of the period (e.g. 1st Aug, Monday or 1/1/2017).
+
+    'dweek', 'dmonth', 'dyear' - periods having been begun 7, 31 or 365 days ago.
 
     <from>|<to> ::= <date>
     <date>      is national representation of the date. Take a look at the
@@ -534,13 +547,18 @@ Usage
 
 Description
     Displays a list of tasks for a date piriod. The command displays last 10 tasks
-    unless the period is not specified.
+    unless the period is specified.
 
 Period parameter
-    <period> ::= <from> [<to>] | today|week|month|year|all
+    <period> ::= <from> [<to>] | today|[d]week|[d]month|[d]year|all
 
     The date period can be specified by a single date, from-to pair or
-    keyword - 'today', 'week', 'month', 'year', 'all'.
+    keyword - 'today', '[d]week', '[d]month', '[d]year', 'all'.
+
+    'week', 'month', 'year' - The date keywords are periods beginning with
+    the first calendar day of the period (e.g. 1st Aug, Monday or 1/1/2017).
+
+    'dweek', 'dmonth', 'dyear' - periods having been begun 7, 31 or 365 days ago.
 
     <from>|<to> ::= <date>
     <date>      is national representation of the date. Take a look at the
@@ -604,46 +622,76 @@ Description
         print(tabulate(refined, ['ID', 'Task', 'Activity',
                                  'Started at', 'Description']))
 
-    def parse_timesheet(self, lines):
-        """Parse lines to dictionary"""
-        data = []
-        for line in lines[8:]:
+    def parse_track_line(self, line):
+        """Parse a text line to get track's attributes"""
+        groups = ""
+        try:
+            # Existen track
+            # groups - comment, tid, alias, started, finished
+            groups = re.search(
+                r'^\s*(?P<is_billed>#*)\s*(?P<tid>\d+)'
+                r'\s+(?P<task>\w+)#(?P<project>\w+)\s+'
+                r'(?P<quote1>[\'"]{1})(?P<started>.*?)(?P=quote1)'
+                r'\s+(?P<quote2>[\'"]{1})(?P<finished>.*?)(?P=quote2)'
+                r'\s*$', line.decode('utf8'), re.U).groupdict()
+        except AttributeError:
             try:
-                # groups - comment, tid, alias, started, finished
+                # New track
+                # groups - alias, started, finished
                 groups = re.search(
-                    r'^\s*(?P<is_billed>#*)\s*(?P<tid>\d+)'
-                    r'\s+(?P<task>\w+)#(?P<project>\w+)\s+'
+                    r'^\s*(?P<is_billed>#*)'
+                    r'\s*(?P<task>\w+)#(?P<project>\w+)\s+'
                     r'(?P<quote1>[\'"]{1})(?P<started>.*?)(?P=quote1)'
                     r'\s+(?P<quote2>[\'"]{1})(?P<finished>.*?)(?P=quote2)'
-                    r'\s*', line.decode('utf8'), re.U).groupdict()
+                    r'\s*$', line.decode('utf8'), re.U).groupdict()
             except AttributeError:
                 raise ValueError("*** Error: Unable to parse the line: "
-                                 "'%s'" % line)
+                                "'%s'" % line)
+        return groups
+
+    def parse_timesheet(self, lines, header_len):
+        """Parse lines to dictionary"""
+        data = []
+        error_message = str(""
+            "*** Error in line {n}: 'The task '{task}#{project}' containts "
+            "an invalid period: '{started}'-'{finished}'.")
+        for n, line in enumerate(lines):
+            groups = self.parse_track_line(line)
+            lnum = n + header_len
             # Parse dates
-            started = datetime.datetime.strptime(groups['started'], '%x %X')
-            finished = datetime.datetime.strptime(groups['finished'], '%x %X')
+            try:
+                started = datetime.datetime.strptime(groups['started'], '%x %X')
+                finished = datetime.datetime.strptime(groups['finished'], '%x %X')
+            except ValueError, message:
+                raise errors.ParsingError(error_message.format(
+                    n=lnum, started=groups['started'], finished=groups['finished'],
+                    task=groups['task'], project=groups['project']), lnum)
             if started > finished:
-                raise ValueError("*** Error: '{started}'-'{finished}' does "
-                                 "not contain a valid period for the "
-                                 "track: '{tid}'.".format(
-                                     started=started, finished=finished,
-                                     tid=groups['tid']))
+                raise errors.ParsingError(error_message.format(
+                    n=lnum, started=started, finished=finished,
+                    task=groups['task'], project=groups['project']), lnum)
             groups['started'] = started
             groups['finished'] = finished
             data.append(groups)
         return data
 
     def send_timesheet_to_db(self, groups):
-        """Updates the DB with an edited timesheet"""
-        # Check if task exists
+        """Updates the DB with a track"""
+        # Check if the task exists
         task = self.db.get_task_by_alias(groups['task'],
                                          groups['project'])
         if not task:
             raise ValueError(u"*** Error: The task '{}#{}' has not been "
                              "found.".format(groups['task'],
                                              groups['project']).encode('utf-8'))
-
-        # Check if track exist
+        # Create the track if one does not have an ID
+        if not 'tid' in groups:
+            self.db.create_track(task['tid'],
+                                 groups['started'], groups['finished'],
+                                 int(not bool(groups['is_billed'])))
+            return
+        # Update the track
+        # Check if the track exist
         track = self.db.get_track_by_id(int(groups['tid']))
         if not track:
             raise ValueError("*** Error: The track '%s' has not "
@@ -656,6 +704,67 @@ Description
                              groups['started'], groups['finished'],
                              int(not bool(groups['is_billed'])))
 
+    def create_tracks_contents(self, tracks):
+        """Create a text body of tracks"""
+        rows = []
+        # Expose dates for an editor
+        for track in tracks:
+            rows.append([
+                '%s%d' % ('#' if not track['is_billed'] else '  ',
+                            track['trid']),
+                u'#'.join([track['tname'], track['pname']]),
+                datetime.datetime.strftime(track['started'],
+                                            "'%x %X'").decode('utf8'),
+                datetime.datetime.strftime(track['finished'],
+                                            "'%x %X'").decode('utf8')
+            ])
+        trows = tabulate(rows, ['ID', 'Task', 'Started', 'Finished',
+                                'Description'], tablefmt='simple')
+        return trows
+
+    def create_timesheet_contents(self, tracks, started, finished):
+
+        example = "15 cost#kafka '{time}' '{time}'".format(
+            time=datetime.datetime.strftime(datetime.datetime.now(),
+                                            "%x %X").decode('utf8')
+        )
+        contents = str(
+            "# From Date: {started}{eol}"
+            "# To Date:   {finished}{eol}#{eol}"
+            "# No updating, but the dates only!{eol}"
+            "# Use the '#' character to mark the track as unbilled.{eol}"
+            "#{eol}"
+            "# Example track:{eol}"
+            "#     {example}{eol}"
+            "#{eol}"
+            "{eol}"
+            "{tracks}".format(
+                started=started,
+                finished=finished,
+                example=example,
+                eol=os.linesep,
+                tracks=tracks.encode('utf8'))
+        )
+        return contents
+
+    def open_external_editor(self, contents, lnum=0):
+        """Open an external editor with the contents"""
+        with NamedTemporaryFile('w+', suffix=".tmp", delete=True) as tmp_file:
+            tmp_file.write(contents)
+            tmp_file.seek(0)
+            # Run editor
+            if config.BT_EDITOR_START_LINE:
+                start_at_line_arg = "%s%s" % (config.BT_EDITOR_START_LINE, lnum)
+            try:
+                call([config.BT_EDITOR, start_at_line_arg, tmp_file.name])
+            except OSError, msg:
+                print("*** Error: %s Inspect the editor path '%s'."
+                      "" % (config.BT_EDITOR, msg))
+                raise
+            # Fetch rows from file
+            lines = tmp_file.readlines()
+            return lines
+
     def update_timesheet(self, args):
         """Update timesheet with an external editor"""
         if len(args) == 1:
@@ -663,68 +772,52 @@ Description
             return
         try:
             started, finished = helpers.parse_date_parameters(args[1:])
-        except ValueError, error:
+        except ValueError as error:
             print(error)
             return
         if started == datetime.date.fromtimestamp(0):
             track = self.db.get_minimal_started_track()
-            if not track:
-                print("There are no tracks has been found.")
-                return
-            started = track['started']
+            if track:
+                started = track['started']
+            else:
+                started = finished
         # Get timesheet records
         tracks = self.db.get_tracks_by_date(started, finished,
                                             also_unfinished=False)
-        if not tracks:
-            print("There are no tracks has been found.")
-            return
-        with NamedTemporaryFile('w+', suffix=".tmp", delete=True) as tmp_file:
-            rows = []
-            # Expose dates for an editor
-            for track in tracks:
-                rows.append([
-                    '%s%d' % ('#' if not track['is_billed'] else '  ',
-                              track['trid']),
-                    u'#'.join([track['tname'], track['pname']]),
-                    datetime.datetime.strftime(track['started'],
-                                               "'%x %X'").decode('utf8'),
-                    datetime.datetime.strftime(track['finished'],
-                                               "'%x %X'").decode('utf8')
-                ])
-            trows = tabulate(rows, ['ID', 'Task', 'Started', 'Finished',
-                                    'Description'], tablefmt='simple')
-            comment = str(
-                "# From Date: {started}{eol}"
-                "# To Date:   {finished}{eol}#{eol}"
-                "# Update the dates only!{eol}"
-                "# Use the '#' character to mark a track as unbilled.{eol}{eol}"
-                "".format(started=started, finished=finished, eol=os.linesep)
-            )
-            tmp_file.write(comment)
-            tmp_file.write(trows.encode('utf8'))
-            tmp_file.seek(0)
-            # Run editor
+        tracks_contents = self.create_tracks_contents(tracks)
+        lnum = 0
+        while(True):
             try:
-                call([config.BT_EDITOR, tmp_file.name])
-            except OSError, msg:
-                print("*** Error: %s Inspect the editor path '%s'."
-                      "" % (config.BT_EDITOR, msg))
+                contents = self.create_timesheet_contents(tracks_contents,
+                                                          started,
+                                                          finished)
+                timesheet = self.open_external_editor(contents, lnum)
+                header_length = len(timesheet) - len(tracks)
+                header = timesheet[header_length-2:header_length]
+                lines = timesheet[header_length:]
+            except OSError, message:
+                print("*** Error: %s", message)
                 return
-            # Fetch rows from file
-            lines = tmp_file.readlines()
-        if len(lines) < 8:
-            print("*** Warning: The timesheet is empty.")
-            return
-        # Parse lines
-        try:
-            data = self.parse_timesheet(lines)
-        except ValueError, error:
-            print(error)
-            return
-        # Update the DB
-        for groups in data:
+            if not len(lines):
+                print("*** Warning: The timesheet is empty.")
+                return
+            # Parse lines
             try:
-                self.send_timesheet_to_db(groups)
+                data = self.parse_timesheet(lines, header_length+1)
+            except errors.ParsingError as error:
+                print(error.msg)
+                print("Would you like to update the timesheet again? [Y/n] ")
+                if not helpers.get_yes_no(default='y'):
+                    return
+                header.extend(lines)
+                tracks_contents = "".join(header)
+                lnum = error.lnum
+                continue
+            break
+        # Update the DB
+        for tracks in data:
+            try:
+                self.send_timesheet_to_db(tracks)
             except ValueError, error:
                 print(error)
                 return
@@ -779,7 +872,7 @@ Description
         refined = []
         total_spent = 0
         if not timesheet:
-            print("There are no tracks has been found.")
+            print("There are no tracks have been found.")
             return
         for row in timesheet:
             row = list(row)
@@ -828,7 +921,7 @@ Description
         if started == datetime.date.fromtimestamp(0):
             track = self.db.get_minimal_started_track(tname, pname)
             if not track:
-                print("There are no tracks has been found.")
+                print("There are no tracks have been found.")
                 return
             started = track['started']
         # Check if there is an unfinished task
@@ -849,12 +942,48 @@ Description
         # Make a report
         self.make_report(tname, pname, started, finished, mask)
 
-    def do_tsup(self, arg):
-        """A shortcut to update timesheets for today. Look at 'help timesheet' for details."""
+    def do_up(self, arg):
+        """Update the timesheet. Look at 'help timesheet' for details."""
+        self.do_timesheet('update %s' % arg)
+
+    def do_upt(self, arg):
+        """Update the timesheet for today. Look at 'help timesheet' for details."""
         self.do_timesheet('update today')
 
+    def do_upw(self, arg):
+        """Update the timesheet for a week. Look at 'help timesheet' for details."""
+        self.do_timesheet('update week')
+
+    def do_upm(self, arg):
+        """Update the timesheet for a month. Look at 'help timesheet' for details."""
+        self.do_timesheet('update week')
+
+    def do_rt(self, arg):
+        """Report the timesheet for today."""
+        self.do_timesheet('report today')
+
+    def do_rrt(self, arg):
+        """Report the detailed timesheet for today."""
+        self.do_timesheet('report extend track today')
+
+    def do_rw(self, arg):
+        """Report the timesheet for a week."""
+        self.do_timesheet('report week')
+
+    def do_rrw(self, arg):
+        """Report the detailed timesheet for a week."""
+        self.do_timesheet('report extend track week')
+
+    def do_rm(self, arg):
+        """Report the timesheet for a month."""
+        self.do_timesheet('report month')
+
+    def do_ry(self, arg):
+        """Report the timesheet for a year."""
+        self.do_timesheet('report year')
+
     def do_ts(self, arg):
-        """A shortcut for timesheet command. Take a look at 'help timesheet' for details."""
+        """A shortcut for the timesheet command. Take a look at 'help timesheet' for details."""
         self.do_timesheet(arg)
 
     def do_timesheet(self, arg):
@@ -895,10 +1024,15 @@ Parameters
                     the default value is date,task
 
 Period parameter
-    <period> ::= <from> [<to>] | today|week|month|year|all
+    <period> ::= <from> [<to>] | today|[d]week|[d]month|[d]year|all
 
     The date period can be specified by a single date, from-to pair or
-    keyword - 'today', 'week', 'month', 'year', 'all'.
+    keyword - 'today', '[d]week', '[d]month', '[d]year', 'all'.
+
+    'week', 'month', 'year' - The date keywords are periods beginning with
+    the first calendar day of the period (e.g. 1st Aug, Monday or 1/1/2017).
+
+    'dweek', 'dmonth', 'dyear' - periods having been begun 7, 31 or 365 days ago.
 
     <from>|<to> ::= <date> | today
     <date>      is national representation of the date. Take a look at the
@@ -907,15 +1041,15 @@ Period parameter
         def _usage():
             self.do_help('timesheet')
         commands = ['update', 'report']
-        args = shlex.split(arg)
-        args = map(lambda x: x.lower(), args)
-        if not len(args) or args[0] not in commands:
+        words = shlex.split(arg)
+        words = [token.lower() for token in words]
+        if not len(words) or words[0] not in commands:
             print(self.error_wrong_parameters)
             return
-        if args[0] == 'update':
-            self.update_timesheet(args)
-        elif args[0] == 'report':
-            self.report_timesheet(args)
+        if words[0] == 'update':
+            self.update_timesheet(words)
+        elif words[0] == 'report':
+            self.report_timesheet(words)
         return
 
 
