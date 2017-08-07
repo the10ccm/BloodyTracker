@@ -11,4 +11,6 @@ TODO
 08. Round time to 5 minues
 09. Colorize
 10. Display a calendar
-11. [Hi] Delete track in the external editor
+11. [Hi] Add the time period as '-day' values
+12. add unfinished task's test
+

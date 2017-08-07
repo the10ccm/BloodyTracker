@@ -9,6 +9,7 @@ import re
 import sys
 import readline
 import shlex
+import operator
 from cmd import Cmd
 from subprocess import call
 from tempfile import NamedTemporaryFile
@@ -154,7 +155,7 @@ class BTShell(Cmd):
     def do_fill_db_with_fake_tracks(self, arg):
         """Fill with the test tasks"""
         print('*** Warning! All records will be deleted!')
-        print('Do you really want to fill the Data Base with fake records? [y/N] ', end='')
+        print('Do you really want to fill the Database with fake records? [y/N] ', end='')
         if not helpers.get_yes_no(default='n'):
             return
         self.db.fill()
@@ -624,41 +625,34 @@ Description
 
     def parse_track_line(self, line):
         """Parse a text line to get track's attributes"""
-        groups = ""
         try:
-            # Existen track
-            # groups - comment, tid, alias, started, finished
+            # New track
+            # groups - alias, started, finished
             groups = re.search(
-                r'^\s*(?P<is_billed>#*)\s*(?P<tid>\d+)'
-                r'\s+(?P<task>\w+)#(?P<project>\w+)\s+'
+                r'^\s*$|'
+                r'^\s*(?P<is_billed>#*)'
+                r'\s*(?P<task>\w+)#(?P<project>\w+)\s+'
                 r'(?P<quote1>[\'"]{1})(?P<started>.*?)(?P=quote1)'
                 r'\s+(?P<quote2>[\'"]{1})(?P<finished>.*?)(?P=quote2)'
-                r'\s*$', line.decode('utf8'), re.U).groupdict()
+                r'\s*$', line.decode('utf8'), re.U
+            ).groupdict()
         except AttributeError:
-            try:
-                # New track
-                # groups - alias, started, finished
-                groups = re.search(
-                    r'^\s*(?P<is_billed>#*)'
-                    r'\s*(?P<task>\w+)#(?P<project>\w+)\s+'
-                    r'(?P<quote1>[\'"]{1})(?P<started>.*?)(?P=quote1)'
-                    r'\s+(?P<quote2>[\'"]{1})(?P<finished>.*?)(?P=quote2)'
-                    r'\s*$', line.decode('utf8'), re.U).groupdict()
-            except AttributeError:
-                raise ValueError("*** Error: Unable to parse the line: "
-                                "'%s'" % line)
+            raise ValueError("*** Error: Unable to parse the line: '%s'" % line)
         return groups
 
     def parse_timesheet(self, lines, header_len):
         """Parse lines to dictionary"""
         data = []
-        error_message = str(""
+        error_message = unicode(""
             "*** Error in line {n}: 'The task '{task}#{project}' containts "
             "an invalid period: '{started}'-'{finished}'.")
         for n, line in enumerate(lines):
             groups = self.parse_track_line(line)
-            lnum = n + header_len
-            # Parse dates
+            # ignore empty strings
+            if not groups['task']:
+                continue
+            lnum = n + header_len + 2
+            # Validate dates
             try:
                 started = datetime.datetime.strptime(groups['started'], '%x %X')
                 finished = datetime.datetime.strptime(groups['finished'], '%x %X')
@@ -670,82 +664,63 @@ Description
                 raise errors.ParsingError(error_message.format(
                     n=lnum, started=started, finished=finished,
                     task=groups['task'], project=groups['project']), lnum)
+            # Validate the task name
+            task = self.db.get_task_by_alias(groups['task'], groups['project'])
+            if not task:
+                raise ValueError(u"*** Error in line {n}: The task '{t}#{p}' has not been "
+                                "found.".format(n=lnum, t=groups['task'],
+                                                p=groups['project']).encode('utf-8'))
             groups['started'] = started
             groups['finished'] = finished
+            groups['tid'] = task['tid']
             data.append(groups)
         return data
 
-    def send_timesheet_to_db(self, groups):
-        """Updates the DB with a track"""
-        # Check if the task exists
-        task = self.db.get_task_by_alias(groups['task'],
-                                         groups['project'])
-        if not task:
-            raise ValueError(u"*** Error: The task '{}#{}' has not been "
-                             "found.".format(groups['task'],
-                                             groups['project']).encode('utf-8'))
-        # Create the track if one does not have an ID
-        if not 'tid' in groups:
-            self.db.create_track(task['tid'],
-                                 groups['started'], groups['finished'],
-                                 int(not bool(groups['is_billed'])))
-            return
-        # Update the track
-        # Check if the track exist
-        track = self.db.get_track_by_id(int(groups['tid']))
-        if not track:
-            raise ValueError("*** Error: The track '%s' has not "
-                             "been found." % groups['tid'])
-        # Check if the task and the project are valid for the record
-        if task['tid'] != track['tid'] or task['pname'] != track['pname']:
-            raise ValueError("*** Error: The project '%d' and task '%d' "
-                             "are not valid.")
-        self.db.update_track(int(groups['tid']),
-                             groups['started'], groups['finished'],
-                             int(not bool(groups['is_billed'])))
-
     def create_tracks_contents(self, tracks):
-        """Create a text body of tracks"""
+        """Create a text body with tracks"""
         rows = []
         # Expose dates for an editor
         for track in tracks:
             rows.append([
-                '%s%d' % ('#' if not track['is_billed'] else '  ',
-                            track['trid']),
-                u'#'.join([track['tname'], track['pname']]),
+                '%s%s' % (u'#  ' if not track['is_billed'] else '  ',
+                          u'#'.join([track['tname'], track['pname']])
+                          ),
                 datetime.datetime.strftime(track['started'],
                                             "'%x %X'").decode('utf8'),
                 datetime.datetime.strftime(track['finished'],
                                             "'%x %X'").decode('utf8')
             ])
-        trows = tabulate(rows, ['ID', 'Task', 'Started', 'Finished',
+        trows = tabulate(rows, ['Task', 'Started', 'Finished',
                                 'Description'], tablefmt='simple')
         return trows
 
-    def create_timesheet_contents(self, tracks, started, finished):
-
-        example = "15 cost#kafka '{time}' '{time}'".format(
+    def get_timesheet_header(self, started, finished):
+        example = "cost#kafka '{time}' '{time}'".format(
             time=datetime.datetime.strftime(datetime.datetime.now(),
                                             "%x %X").decode('utf8')
         )
-        contents = str(
-            "# From Date: {started}{eol}"
-            "# To Date:   {finished}{eol}#{eol}"
-            "# No updating, but the dates only!{eol}"
-            "# Use the '#' character to mark the track as unbilled.{eol}"
-            "#{eol}"
-            "# Example track:{eol}"
-            "#     {example}{eol}"
-            "#{eol}"
-            "{eol}"
-            "{tracks}".format(
+        contents = unicode(
+            u"# From Date: {started}{eol}"
+            u"# To Date:   {finished}{eol}"
+            u"#{eol}"
+            u"# Use the '#' character to mark the tracks as unbilled.{eol}"
+            u'# Empty string will be ignore.{eol}'
+            u'#{eol}'
+            u"# Warning: Removing any track line causes the track record deletion!{eol}"
+            u"#{eol}"
+            u"# Example track:{eol}"
+            u"#     {example}{eol}"
+            u"#{eol}"
+            u"{eol}".format(
                 started=started,
                 finished=finished,
                 example=example,
-                eol=os.linesep,
-                tracks=tracks.encode('utf8'))
-        )
+                eol=os.linesep)
+        ).encode('utf8')
         return contents
+
+    def create_timesheet_contents(self, header, tracks):
+        return "%s%s" % (header, tracks)
 
     def open_external_editor(self, contents, lnum=0):
         """Open an external editor with the contents"""
@@ -784,43 +759,43 @@ Description
         # Get timesheet records
         tracks = self.db.get_tracks_by_date(started, finished,
                                             also_unfinished=False)
+        # Exposure tracks to the table
         tracks_contents = self.create_tracks_contents(tracks)
         lnum = 0
+        header = self.get_timesheet_header(started, finished)
+        header_length = len(header.split(os.linesep))
         while(True):
             try:
-                contents = self.create_timesheet_contents(tracks_contents,
-                                                          started,
-                                                          finished)
+                # Create the editor's contents
+                contents = self.create_timesheet_contents(header, tracks_contents)
                 timesheet = self.open_external_editor(contents, lnum)
-                header_length = len(timesheet) - len(tracks)
-                header = timesheet[header_length-2:header_length]
-                lines = timesheet[header_length:]
+                # we must get the table header here due to the length of the columns
+                table_header = timesheet[header_length-1:header_length+1]
+                tracks = timesheet[header_length+1:]
             except OSError, message:
                 print("*** Error: %s", message)
                 return
-            if not len(lines):
-                print("*** Warning: The timesheet is empty.")
-                return
-            # Parse lines
+            # Parse the input
             try:
-                data = self.parse_timesheet(lines, header_length+1)
+                data = self.parse_timesheet(tracks, header_length)
             except errors.ParsingError as error:
                 print(error.msg)
                 print("Would you like to update the timesheet again? [Y/n] ")
                 if not helpers.get_yes_no(default='y'):
                     return
-                header.extend(lines)
-                tracks_contents = "".join(header)
+                table_header.extend(tracks)
+                tracks_contents = "".join(table_header)
                 lnum = error.lnum
                 continue
             break
         # Update the DB
-        for tracks in data:
-            try:
-                self.send_timesheet_to_db(tracks)
-            except ValueError, error:
-                print(error)
-                return
+        # TODO: get rid the danger operation
+        self.db.delete_tracks_by_date(started=started, finished=finished)
+        data.sort(key=operator.itemgetter('started'))
+        for track in data:
+            self.db.create_track(track['tid'],
+                                 track['started'], track['finished'],
+                                 int(not bool(track['is_billed'])))
         print('The timesheet has been updated.')
 
     def validate_object(self, keyword, thing):

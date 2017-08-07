@@ -362,6 +362,12 @@ q     | quit
 
 ## History
 
+### v1.0.3
+```
+[new] Tracks may be deleted in the external editor
+[new] Empty lines in the external editor are allowed now
+```
+
 ### v1.0.2
 ```
 [new] Allowed to add a new track with the external editor

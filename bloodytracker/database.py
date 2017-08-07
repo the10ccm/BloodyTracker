@@ -155,7 +155,7 @@ class Database:
         self.cursor.execute("SELECT * FROM Tracks ")
         tracks = self.cursor.fetchall()
         #print('filled tracks', tracks)
-        print(tabulate(tracks, ['Track id', 'Task id', 'started', 'finished'],
+        print(tabulate(tracks, ['Track id', 'Task id', 'started', 'finished', 'billed'],
                        tablefmt='simple'))
         return
 
@@ -457,8 +457,13 @@ class Database:
     def get_tracks_by_date(self, started='', finished='', also_unfinished=False):
         """Get tracks"""
         where_clause = ''
+        between_clause = ''
+        params = []
         if not also_unfinished:
             where_clause = "AND NOT finished == '' "
+        if started and finished:
+            between_clause = "AND DATE(started) BETWEEN ? AND ?"
+            params.extend([started, finished])
         self.cursor.execute(
             "SELECT "
             "   Tasks.id as tid, Tasks.name as tname, "
@@ -469,11 +474,14 @@ class Database:
             "FROM Tracks, Tasks, Projects "
             "WHERE "
             "   Tracks.task_id == tid AND "
-            "   Tasks.project_id == pid AND "
-            "   DATE(started) BETWEEN '{started}' AND '{finished}' "
+            "   Tasks.project_id == pid"
             "   {where_clause} "
-            "ORDER BY Tracks.id".format(started=started, finished=finished,
-                                        where_clause=where_clause)
+            "   {between_clause} "
+            "ORDER BY Tracks.id".format(started=started,
+                                        finished=finished,
+                                        where_clause=where_clause,
+                                        between_clause=between_clause),
+            params
         )
         return self.cursor.fetchall()
 
@@ -492,7 +500,6 @@ class Database:
         )
         return self.cursor.fetchone()
 
-    # TRACKS
     def create_track(self, task_id, started='', finished='', is_billed=True):
         # started, finished - 9-item sequence, not float
         if not started:
@@ -519,6 +526,21 @@ class Database:
             "UPDATE Tracks "
             "SET started=?, finished=?, is_billed=? "
             "WHERE id=?", (started, finished, is_billed, track_id)
+        )
+        self.conn.commit()
+
+    def delete_tracks_by_date(self, started, finished, also_unfinished=False):
+        """Deletes tracks by the date"""
+        if not also_unfinished:
+            where_clause = "AND NOT finished == '' "
+        self.cursor.execute(
+            "DELETE "
+            "   FROM Tracks "
+            "WHERE "
+            "   DATE(started) BETWEEN ? AND ?"
+            "   {where_clause}"
+            "".format(where_clause=where_clause),
+            (started, finished)
         )
         self.conn.commit()
 

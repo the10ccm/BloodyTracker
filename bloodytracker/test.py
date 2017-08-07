@@ -10,6 +10,7 @@ import random
 
 from mock import patch
 
+import bloodytracker
 import config
 import helpers
 from database import Database
@@ -90,6 +91,7 @@ class TestCLITimesheet(unittest.TestCase):
         now = datetime.datetime.now()
         today = datetime.datetime(now.year, now.month, now.day)
         yesterday = today - datetime.timedelta(days=1)
+        tomorrow = today + datetime.timedelta(days=1)
 
         # Warning! We should add some delta to 'started' field to get rid
         # an equel starting time for the all records
@@ -144,7 +146,7 @@ class TestCLITimesheet(unittest.TestCase):
         _create_track(tid1, today, today+datetime.timedelta(seconds=30*60), 4)
         _create_track(tid1, today, today+datetime.timedelta(seconds=15*60), 5)
         _create_track(tid21, today, today+datetime.timedelta(seconds=50*60), 6)
-        finished = today+datetime.timedelta(seconds=2*3600+30*60)
+        finished = today + datetime.timedelta(seconds=2*3600+30*60)
         _create_track(tid22, today, finished, 7)
 
         # test today
@@ -327,6 +329,63 @@ class TestCLITimesheet(unittest.TestCase):
                 ).strftime('%x %X'), "2h:30m:00s")
         ]
         _test_report('report extend track all', timesheet, '1 days 8h:55m:00s')
+
+        # Test updating
+        def _open_external_editor(self, contents, lnum=0):
+            if TestCLITimesheet.tracks_contents:
+                #import ipdb;ipdb.sset_trace()
+                contents = TestCLITimesheet.tracks_contents
+            return contents.split(os.linesep)
+
+        #orig_function = bloodytracker.BTShell.open_external_editor
+        bloodytracker.BTShell.open_external_editor = _open_external_editor
+        header = self.shell.get_timesheet_header(yesterday, tomorrow)
+        tracks_contents = unicode(
+            u"Task    Started                Finished{eol}"
+            u"------  ---------------------  ---------------------{eol}"
+            u"#{t1}#{p1}  '08/03/2017 11:18:18'  '08/03/2017 12:18:19'{eol}"
+            u"{t1}#{p1}  '08/03/2017 15:04:58'  '08/03/2017 15:21:38'{eol}"
+            u"{t1}#{p1}  '08/03/2017 15:38:18'  '08/03/2017 15:54:58'{eol}"
+            u"{t21}#{p2}  '08/03/2017 16:11:38'  '08/03/2017 16:28:18'{eol}"
+            u"{t21}#{p2}  '08/03/2017 16:44:58'  '08/03/2017 17:01:38'{eol}"
+            u"{t22}#{p2}  '08/03/2017 17:18:18'  '08/03/2017 17:34:58'{eol}"
+            u"{t21}#{p2}  '08/03/2017 17:51:38'  '08/03/2017 18:08:18'{eol}"
+            u"{t22}#{p2}  '08/04/2017 11:18:18'  '08/04/2017 12:18:18'{eol}"
+            u"{t21}#{p2}  '08/05/2017 11:18:18'  '08/05/2017 12:18:18'{eol}"
+            u"#{t21}#{p2}  '08/07/2017 10:23:18'  '08/07/2017 10:33:18'{eol}"
+            u"".format(eol=os.linesep, p1=pname1, p2=pname2,
+                      t1=tname1, t21=tname21, t22=tname22)
+        ).encode('utf8')
+        TestCLITimesheet.tracks_contents = self.shell.create_timesheet_contents(
+            header, tracks_contents)
+        with patch('sys.stdout', new=StringIO()) as output:
+            self.shell.do_timesheet('update all')
+            self.assertIn('The timesheet has been updated.',
+                          output.getvalue().strip())
+        tracks = self.shell.db.get_tracks_by_date()
+        self.assertTrue(tracks)
+        self.assertEqual(len(tracks), 10)
+        self.assertFalse(tracks[9]['is_billed'])
+        self.assertFalse(tracks[0]['is_billed'])
+        self.assertTrue(tracks[1]['is_billed'])
+
+        tracks_contents = unicode(
+            u"Task    Started                Finished{eol}"
+            u"------  ---------------------  ---------------------{eol}"
+            u"{t1}#{p1}  '08/03/2017 61:18:18'  '08/03/2017 12:18:19'{eol}"
+            u"{t21}#{p2}  '08/05/2017 11:18:18'  '08/05/2017 12:18:18'{eol}"
+            u"{t21}#{p2}  '08/07/2017 10:23:18'  '08/07/2017 10:33:18'{eol}"
+            u"".format(eol=os.linesep, p1=pname1, p2=pname2,
+                      t1=tname1, t21=tname21, t22=tname22)
+        ).encode('utf8')
+        TestCLITimesheet.tracks_contents = self.shell.create_timesheet_contents(
+            header, tracks_contents)
+        # Pass through the error raised by the wrong date
+        with patch('helpers.get_yes_no', return_value=False):
+            with patch('sys.stdout', new=StringIO()) as output:
+                self.shell.do_timesheet('update all')
+                self.assertIn('Error in line',
+                            output.getvalue().strip())
 
 
 class TestCLIGeneral(unittest.TestCase):
