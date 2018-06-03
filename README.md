@@ -174,15 +174,17 @@ Here is a shot of using this commands:
 #### Period parameter
 The period parameter has its own syntax:
 ```
-[<from> [<to>]] | [today|[d]week|[d]month|[d]year|all]
+<from> [<to>] | today|[d]week|[d]month|[d]year|all|-<N>
 ```
 The date period can be specified by a single date, from-to pair or keyword - 'today',
 '[d]week', '[d]month', '[d]year', 'all'.
 
-'week', 'month', 'year' - The date keywords are periods beginning with
-the first calendar day of the period (e.g. 1st Aug, Monday or 1/1/2017).
+'week', 'month', 'year' - The date keywords are the first calendar days
+of the certain period (e.g. 1st Aug, Monday or 1/1/2017).
 
-'dweek', 'dmonth', 'dyear' - are periods having been begun 7, 31 or 365 days ago.
+'dweek', 'dmonth', 'dyear' - are period being begun 7, 31 or 365 days ago.
+
+-<N> - specify the date as a number of days ago
 
 The dates have national representation of the date. Take a look at the `strftime('%x')` function or run `date "+%x"` in the Shell. The representation of the date depends on the `locale` option in the config. So you can fiddle one to what you want to see and how you want to input dates.
 
@@ -343,11 +345,11 @@ alias | shell's command
 a     | active
 d     | done
 pp    | projects
-p     | project
+p     | project <args>
 tt    | tasks
-t     | task
-ts    | timesheet
-up    | timesheet update
+t     | task <args>
+ts    | timesheet <args>
+up    | timesheet update <args>
 upt   | timesheet update today
 upw   | timesheet update week
 upm   | timesheet update month
@@ -361,6 +363,13 @@ q     | quit
 ```
 
 ## History
+
+### v1.0.4
+```
+[new] Allowed to specify the date as '-N' days ago
+[new] Timesheet rounding
+[upd] Minor updates
+```
 
 ### v1.0.3
 ```

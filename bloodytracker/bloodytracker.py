@@ -66,12 +66,17 @@ class BTShell(Cmd):
         editor_option = 'external_editor'
         start_line_option = 'start_at_line_arg'
         locale_option = 'locale'
+        timesheet_rounding = 'timesheet_rounding'
+        rounding_increment = 'rounding_increment'
         if not cfgs:
-            # Default values
+            # Create an initital config file of the default values
             parser.add_section(section)
-            parser.set(section, editor_option, config.BT_EDITOR)
-            parser.set(section, start_line_option, config.BT_EDITOR_START_LINE)
-            parser.set(section, locale_option, config.BT_LOCALE)
+            parser.set(section, editor_option, 'vim')
+            parser.set(section, start_line_option, '+')
+            # use 'locale -a' command in a shell to get a list of available locales
+            parser.set(section, locale_option, 'en_US')
+            parser.set(section, timesheet_rounding, 'true')
+            parser.set(section, rounding_increment, '5')
             with open(config.BT_CFG_PATHNAME, 'wb') as configfile:
                 parser.write(configfile)
             return
@@ -79,6 +84,8 @@ class BTShell(Cmd):
             config.BT_EDITOR = parser.get(section, editor_option)
             config.BT_LOCALE = parser.get(section, locale_option)
             config.BT_EDITOR_START_LINE = parser.get(section, start_line_option)
+            config.BT_TIMESHEET_ROUNDING = parser.getboolean(section, timesheet_rounding)
+            config.BT_ROUNDING_INCREMENT = parser.getint(section, rounding_increment)
         except ConfigParser.Error:
             raise ValueError(error_message)
 
@@ -361,13 +368,19 @@ Usage
         if not task:
             print('There is not an active task.')
             return
-        finished = self.db.finish_track(task[3])
-        print(u"The task '{task}#{project}' has been done. Time was spent "
-              "{activity}.".format(
-                  task=task['tname'], project=task['pname'],
-                  activity=helpers.seconds_to_human(
-                      (finished - task['started']).total_seconds()))
-             )
+        finished = self.db.finish_track(task['track_id'], task['started'])
+        rounding = ''
+        if config.BT_TIMESHEET_ROUNDING and config.BT_ROUNDING_INCREMENT:
+            rounding = " and rounded to the next %s minute(s)" % \
+                            config.BT_ROUNDING_INCREMENT
+        print(u"The task '{task}#{project}' has been done. {activity} was spent"
+              "{rounding}.".format(
+                    task=task['tname'], project=task['pname'],
+                    activity=helpers.seconds_to_human(
+                        (finished - task['started']).total_seconds()),
+                    rounding=rounding
+                )
+            )
         self.set_prompt(self.bloody_prompt)
 
     def display_task_info(self, args):
@@ -501,20 +514,21 @@ Description
     10 projects unless the period is specified.
 
 Period parameter
-    <period> ::= <from> [<to>] | today|[d]week|[d]month|[d]year|all
+    <period> ::= <from> [<to>]  |  today|[d]week|[d]month|[d]year|all|-<N>
 
-    The date period can be specified by a single date, from-to pair or
-    keyword - 'today', '[d]week', '[d]month', '[d]year', 'all'.
+    The date period can be specified with a single date, from-to pair or
+    keyword - 'today', '[d]week', '[d]month', '[d]year', 'all', -<N>.
 
-    'week', 'month', 'year' - The date keywords are periods beginning with
-    the first calendar day of the period (e.g. 1st Aug, Monday or 1/1/2017).
+    week, month, year - The date keywords are the first calendar days
+    of the certain period (e.g. 1st Aug, Monday or 1/1/2017).
 
-    'dweek', 'dmonth', 'dyear' - periods having been begun 7, 31 or 365 days ago.
+    dweek, dmonth, dyear - periods being begun 7, 31 or 365 days ago.
 
-    <from>|<to> ::= <date>
+    -<N> - specify the date as a number of days ago
+
+    <from>|<to> ::= <date> | today | -<N>
     <date>      is national representation of the date. Take a look at the
                 strftime('%x')."""
-
         args = shlex.split(arg)
         limit = 10
         from_date = to_date = ''
@@ -551,20 +565,21 @@ Description
     unless the period is specified.
 
 Period parameter
-    <period> ::= <from> [<to>] | today|[d]week|[d]month|[d]year|all
+    <period> ::= <from> [<to>]  |  today|[d]week|[d]month|[d]year|all|-<N>
 
-    The date period can be specified by a single date, from-to pair or
-    keyword - 'today', '[d]week', '[d]month', '[d]year', 'all'.
+    The date period can be specified with a single date, from-to pair or
+    keyword - 'today', '[d]week', '[d]month', '[d]year', 'all', -<N>.
 
-    'week', 'month', 'year' - The date keywords are periods beginning with
-    the first calendar day of the period (e.g. 1st Aug, Monday or 1/1/2017).
+    week, month, year - The date keywords are the first calendar days
+    of the certain period (e.g. 1st Aug, Monday or 1/1/2017).
 
-    'dweek', 'dmonth', 'dyear' - periods having been begun 7, 31 or 365 days ago.
+    dweek, dmonth, dyear - periods being begun 7, 31 or 365 days ago.
 
-    <from>|<to> ::= <date>
+    -<N> - specify the date as a number of days ago
+
+    <from>|<to> ::= <date> | today | -<N>
     <date>      is national representation of the date. Take a look at the
                 strftime('%x')."""
-
         args = shlex.split(arg)
         if not args:
             # TODAY
@@ -615,13 +630,12 @@ Description
         refined = [[
             task['tid'],
             '#'.join([task['tname'], task['pname']]),
+            datetime.datetime.strftime(task['started'], '%c').decode('utf8'),
             helpers.seconds_to_human(
                 (datetime.datetime.now() - task['started']).total_seconds()),
-            datetime.datetime.strftime(task['started'], '%c').decode('utf8'),
             task['description']
         ]]
-        print(tabulate(refined, ['ID', 'Task', 'Activity',
-                                 'Started at', 'Description']))
+        print(tabulate(refined, ['ID', 'Task', 'Started at', 'Spent', 'Description']))
 
     def parse_track_line(self, line):
         """Parse a text line to get track's attributes"""
@@ -999,17 +1013,19 @@ Parameters
                     the default value is date,task
 
 Period parameter
-    <period> ::= <from> [<to>] | today|[d]week|[d]month|[d]year|all
+    <period> ::= <from> [<to>]  |  today|[d]week|[d]month|[d]year|all|-<N>
 
-    The date period can be specified by a single date, from-to pair or
-    keyword - 'today', '[d]week', '[d]month', '[d]year', 'all'.
+    The date period can be specified with a single date, from-to pair or
+    keyword - 'today', '[d]week', '[d]month', '[d]year', 'all', -<N>.
 
-    'week', 'month', 'year' - The date keywords are periods beginning with
-    the first calendar day of the period (e.g. 1st Aug, Monday or 1/1/2017).
+    week, month, year - The date keywords are the first calendar days
+    of the certain period (e.g. 1st Aug, Monday or 1/1/2017).
 
-    'dweek', 'dmonth', 'dyear' - periods having been begun 7, 31 or 365 days ago.
+    dweek, dmonth, dyear - periods being begun 7, 31 or 365 days ago.
 
-    <from>|<to> ::= <date> | today
+    -<N> - specify the date as a number of days ago
+
+    <from>|<to> ::= <date> | today | -<N>
     <date>      is national representation of the date. Take a look at the
                 strftime('%x')."""
 

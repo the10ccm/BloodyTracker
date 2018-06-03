@@ -91,9 +91,12 @@ finished dates."""
     if not args:
         raise ValueError(error)
     args = [arg.lower() for arg in args]
-    today = datetime.date.today()
-    finished = today
-    if args[0] == 'dweek':
+    finished = today = datetime.date.today()
+    day_delta = re.search(r'^-(\d+)$', args[0])
+    if day_delta:
+        # Allow to specify the time period as a '-N' value
+        started = finished - datetime.timedelta(days=int(day_delta.groups()[0]))
+    elif args[0] == 'dweek':
         started = finished - datetime.timedelta(days=7)
     elif args[0] == 'week':
         started = finished - datetime.timedelta(days=finished.weekday())
@@ -109,7 +112,6 @@ finished dates."""
         started = datetime.date.fromtimestamp(0)
     elif args[0] == 'today':
         started = today
-        finished = started
     else:
         # Parse <from>/<to> date parameters
         try:

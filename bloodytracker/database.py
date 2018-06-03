@@ -428,9 +428,10 @@ class Database:
             "   Tasks.project_id == Projects.id AND "
             "   finished == '' "
             "   {where_date_clause}".format(
-                where_date_clause=where_date_clause,
-                where_project_clause=where_project_clause,
-                where_task_clause=where_task_clause), params
+                    where_date_clause=where_date_clause,
+                    where_project_clause=where_project_clause,
+                    where_task_clause=where_task_clause
+                ), params
             )
         return self.cursor.fetchone()
 
@@ -512,8 +513,13 @@ class Database:
         self.conn.commit()
         return self.cursor.lastrowid
 
-    def finish_track(self, track_id):
+    def finish_track(self, track_id, started=None):
         finished = datetime.datetime.now()
+        if started and config.BT_TIMESHEET_ROUNDING and config.BT_ROUNDING_INCREMENT:
+            delta = finished - started
+            round_to = config.BT_ROUNDING_INCREMENT * 60
+            seconds = round_to - delta.seconds % round_to
+            finished = finished + datetime.timedelta(seconds=seconds)
         self.cursor.execute(
             "UPDATE Tracks SET finished=? WHERE id=?", (finished, track_id)
         )

@@ -333,7 +333,6 @@ class TestCLITimesheet(unittest.TestCase):
         # Test updating
         def _open_external_editor(self, contents, lnum=0):
             if TestCLITimesheet.tracks_contents:
-                #import ipdb;ipdb.sset_trace()
                 contents = TestCLITimesheet.tracks_contents
             return contents.split(os.linesep)
 
@@ -391,7 +390,14 @@ class TestCLITimesheet(unittest.TestCase):
 class TestCLIGeneral(unittest.TestCase):
     """Test shell commands"""
     def setUp(self):
-        config.BT_DB_PATHNAME = ':memory:'
+        def mp_config(self):
+            config.BT_EDITOR = 'vim'
+            config.BT_EDITOR_START_LINE = '+'
+            config.BT_LOCALE = 'en_US'
+            config.BT_TIMESHEET_ROUNDING = False
+            config.BT_ROUNDING_INCREMENT = 5
+            config.BT_DB_PATHNAME = ':memory:'
+        BTShell.init_config = mp_config
         self.shell = BTShell()
 
     def tearDown(self):
@@ -456,12 +462,23 @@ class TestCLIGeneral(unittest.TestCase):
         # Create a task
         with patch('sys.stdout', new=StringIO()) as output:
             self.shell.do_on('{}#{}'.format(task, project))
-            self.assertIn('You are', output.getvalue().strip())
+            screen = output.getvalue().strip()
+            self.assertIn("You are on the task '{}#{}'".format(task, project).decode('utf8'),
+                          screen)
         # Done the task
         with patch('sys.stdout', new=StringIO()) as output:
             self.shell.do_done('')
             self.assertIn('has been done', output.getvalue().strip())
-        # Get the task info
+            self.assertNotIn('rounded', screen)
+        # Check rounding
+        config.BT_TIMESHEET_ROUNDING = True
+        with patch('sys.stdout', new=StringIO()) as output:
+            self.shell.do_on('{}#{}'.format(task, project))
+            self.shell.do_done('')
+            self.assertIn('0h:{:02}m:00s was spent and rounded '
+                          'to the next 5 minute(s).'.format(config.BT_ROUNDING_INCREMENT),
+                          output.getvalue().strip())
+        # Get the task info by 'task' command
         with patch('sys.stdout', new=StringIO()) as output:
             self.shell.do_task(task)
             self.assertIn('Error', output.getvalue().strip())
